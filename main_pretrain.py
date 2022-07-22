@@ -12,6 +12,7 @@ import argparse
 import datetime
 import json
 import numpy as np
+import pandas as pd
 import os
 import time
 from pathlib import Path
@@ -29,8 +30,10 @@ import timm.optim.optim_factory as optim_factory
 
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-
-import models_mae_sum as models_mae
+from util.datasets import scRNACSV, scRNAh5ad
+#os.system('pip install anndata')
+import anndata
+import models_mae
 
 from engine_pretrain import train_one_epoch
 
@@ -46,9 +49,6 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='mae_vit_large_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
-
-    parser.add_argument('--input_size', default=224, type=int,
-                        help='images input size')
 
     parser.add_argument('--mask_ratio', default=0.75, type=float,
                         help='Masking ratio (percentage of removed patches).')
@@ -75,8 +75,16 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
-                        help='dataset path')
+    parser.add_argument('--file_type', default='CSV', type=str,
+                        help='[CSV] or [h5ad], default = CSV')
+    parser.add_argument('--h5ad_path', default='/path/to/h5ad/file/', type=str,
+                        help='Please specify path to the h5ad file.')
+    parser.add_argument('--expr_path', default='/path/to/expression/train/', type=str,
+        help='Please specify path to the expression matrix.')
+    parser.add_argument('--meta_path', default='/path/to/meta/train/', type=str,
+        help='Please specify path to the meta file.')
+    parser.add_argument('--label_name', default='perturb', type=str,
+                        help='Please specify the name of label column in the meta file.')
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
@@ -121,17 +129,27 @@ def main(args):
     np.random.seed(seed)
 
     cudnn.benchmark = True
-
-    # simple augmentation
-#    transform_train = transforms.Compose([
-#            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-#            transforms.RandomHorizontalFlip(),
-#            transforms.ToTensor()])
-#            
-#    #dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    transform_train = flatten()
-#    dataset_train = datasets.FashionMNIST(args.data_path, transform=transform_train, train=True, download=True)
-    dataset_train = datasets.FashionMNIST(args.data_path, transform=transform_train, train=False, download=True)
+    
+    if args.file_type == 'CSV':
+      expr = pd.read_csv(args.expr_path, index_col=0)
+      meta = pd.read_csv(args.meta_path, index_col=0)
+      gene_number = expr.shape[0]
+      print(f'This dataset has {gene_number} genes!')
+      dataset = scRNACSV(expr, meta, args.label_name, instance=False)
+    if args.file_type == 'h5ad':
+      h5ad = anndata.read_h5ad(args.h5ad_path)
+      gene_number = h5ad.shape[1]
+      cell_number = h5ad.shape[0]
+      print(f'This dataset has {gene_number} genes!')
+      print(f'This dataset has {cell_number} cells!')
+      print(np.sum(np.isnan(h5ad.X)))
+      dataset = scRNAh5ad(h5ad, args.label_name, instance=False)
+    
+    trainset_length = int(len(dataset) * 0.8)
+    testset_length = len(dataset) - trainset_length
+    dataset_train, datasetset_test = torch.utils.data.random_split(dataset, [trainset_length, testset_length],
+                                                     generator=torch.Generator().manual_seed(args.seed))
+    
     print(dataset_train)
 
     if True:  # args.distributed:
@@ -160,7 +178,8 @@ def main(args):
     
     # define the model
     model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,
-                                            gene_embed_dim=args.gene_embed_dim)
+#                                            gene_embed_dim=args.gene_embed_dim,
+                                            gene_number = gene_number)
 
     model.to(device)
 
@@ -179,7 +198,7 @@ def main(args):
     print("effective batch size: %d" % eff_batch_size)
 
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
     
     # following timm: set wd as 0 for bias and norm layers
@@ -200,7 +219,7 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        if args.output_dir and (epoch % 20 == 0 or epoch + 1 == args.epochs):
+        if args.output_dir and (epoch % 100 == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch)
@@ -217,18 +236,6 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-
-class flatten(object):
-    def __init__(self):
-        self.totensor = transforms.ToTensor()
-        self.norm = transforms.Normalize(mean=(0.5,), std=(0.5,))
-
-    def __call__(self, x):
-        #inputs = []
-        x = self.totensor(x)
-        x = self.norm(x)
-        x = torch.flatten(x)
-        return x
 
 if __name__ == '__main__':
     args = get_args_parser()

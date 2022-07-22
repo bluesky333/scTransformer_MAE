@@ -74,8 +74,8 @@ def train_one_epoch(model: torch.nn.Module,
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
-            log_writer.add_histogram('pos_embed.weight x1000', model.pos_embed.weight.detach(), epoch_1000x)
-            log_writer.add_histogram('pos_embed.weight', model.pos_embed.weight.detach(), epoch)
+            #log_writer.add_histogram('pos_embed.weight x1000', model.pos_embed.weight.detach(), epoch_1000x)
+            #log_writer.add_histogram('pos_embed.weight', model.pos_embed.weight.detach(), epoch)
 
 
     # gather the stats from all processes
