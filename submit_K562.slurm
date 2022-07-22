@@ -1,18 +1,12 @@
 #!/bin/bash
 
-#SBATCH --mail-user js4435@yale.edu
-#SBATCH --job-name=Zhengmix8eq
+#SBATCH --mail-user jie.sheng@yale.edu
+#SBATCH --job-name=submission
 #SBATCH --output=log.txt
 #SBATCH -p pi_dijk
 #SBATCH --mail-type=ALL
-#SBATCH --gres=gpu:rtx3090:1
-#SBATCH --time=10:00
+#SBATCH --time=5:00
 #SBATCH --cpus-per-task=1
-
-module load CUDA
-module load cuDNN
-# using your anaconda environment
-source /ysm-gpfs/apps/software/miniconda/4.11.0/bin/activate pytorch_env
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
@@ -33,4 +27,5 @@ python /home/js4435/project/scmae_01_Zhengmix8eq/code/submitit_pretrain.py \
     --file_type 'h5ad' \
     --h5ad_path '/home/js4435/scratch60/K562_gwps_normalized_singlecell_01.h5ad' \
     --label_name gene \
+    --partition pi_dijk \
     --partition pi_dijk \
