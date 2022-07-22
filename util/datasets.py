@@ -11,55 +11,109 @@
 import os
 import PIL
 
+from torch.utils.data import Dataset
+import numpy as np
+import torch
+
 from torchvision import datasets, transforms
 
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
+class scRNACSV(Dataset):
+  def __init__(self, expr, meta, label_name, instance=False, transform=None, target_transform=None):
+    # Load the expr
+    self.expr = torch.from_numpy(expr.values).float()
+    self.meta = meta
 
-def build_dataset(is_train, args):
-    transform = build_transform(is_train, args)
+    # Cells are the column names of the expr, labels is a column of the meta data
+    self.cells = list(expr.columns)
+    self.labels = list(meta[label_name])
 
-    root = os.path.join(args.data_path, 'train' if is_train else 'val')
-    dataset = datasets.ImageFolder(root, transform=transform)
+    # Get the uniform labels list and sort the list
+    self.label_keys = list(set(self.labels))
+    self.label_keys.sort()
 
-    print(dataset)
+    # Generate the label dictionary, where key is the string label, and value is the integer label
+    self.label_dic = {}
+    for label, i in zip(self.label_keys, range(len(self.label_keys))):
+      self.label_dic[label] = i
+    print(f"This is the label dictionary of this dataset {self.label_dic}")
 
-    return dataset
+    # Assign the string label
+    self.str_label = self.labels
+    self.labels = [self.label_dic[i] for i in self.labels]
 
+    # Assign the transform
+    self.transform = transform
+    self.target_transform = target_transform
 
-def build_transform(is_train, args):
-    mean = IMAGENET_DEFAULT_MEAN
-    std = IMAGENET_DEFAULT_STD
-    # train transform
-    if is_train:
-        # this should always dispatch to transforms_imagenet_train
-        transform = create_transform(
-            input_size=args.input_size,
-            is_training=True,
-            color_jitter=args.color_jitter,
-            auto_augment=args.aa,
-            interpolation='bicubic',
-            re_prob=args.reprob,
-            re_mode=args.remode,
-            re_count=args.recount,
-            mean=mean,
-            std=std,
-        )
-        return transform
+    # If we should return instance index or label
+    self.ifInstance = instance
 
-    # eval transform
-    t = []
-    if args.input_size <= 224:
-        crop_pct = 224 / 256
+  def __len__(self):
+    return self.expr.shape[1]
+
+  def __getitem__(self, idx, return_lab=True):
+    one_cell = self.expr[:, idx]
+
+    if self.transform:
+      ret = self.transform(one_cell)
     else:
-        crop_pct = 1.0
-    size = int(args.input_size / crop_pct)
-    t.append(
-        transforms.Resize(size, interpolation=PIL.Image.BICUBIC),  # to maintain same ratio w.r.t. 224 images
-    )
-    t.append(transforms.CenterCrop(args.input_size))
+      ret = one_cell
 
-    t.append(transforms.ToTensor())
-    t.append(transforms.Normalize(mean, std))
-    return transforms.Compose(t)
+    lab = self.label_dic[self.str_label[idx]]
+
+    if self.ifInstance:
+      return ret, idx
+    else:
+      return ret, lab
+
+class scRNAh5ad(Dataset):
+  def __init__(self, h5ad, label_name, instance=False, transform=None, target_transform=None):
+    # Load the expr
+    self.expr = torch.from_numpy(h5ad.X.T).float()
+    self.meta = h5ad.obs
+
+    # Cells are the column names of the expr, labels is a column of the meta data
+    self.cells = list(h5ad.obs.index.values)
+    self.labels = list(h5ad.obs[label_name])
+
+    # Get the uniform labels list and sort the list
+    self.label_keys = list(set(self.labels))
+    self.label_keys.sort()
+
+    # Generate the label dictionary, where key is the string label, and value is the integer label
+    self.label_dic = {}
+    for label, i in zip(self.label_keys, range(len(self.label_keys))):
+      self.label_dic[label] = i
+    print(f"This is the label dictionary of this dataset {self.label_dic}")
+
+    # Assign the string label
+    self.str_label = self.labels
+    self.labels = [self.label_dic[i] for i in self.labels]
+
+    # Assign the transform
+    self.transform = transform
+    self.target_transform = target_transform
+
+    # If we should return instance index or label
+    self.ifInstance = instance
+
+  def __len__(self):
+    return self.expr.shape[1]
+
+  def __getitem__(self, idx, return_lab=True):
+    one_cell = self.expr[:, idx]
+
+    if self.transform:
+      ret = self.transform(one_cell)
+    else:
+      ret = one_cell
+
+    lab = self.label_dic[self.str_label[idx]]
+
+    if self.ifInstance:
+      return ret, idx
+    else:
+      return ret, lab
