@@ -42,7 +42,7 @@ python main_pretrain.py \
     --batch_size 8 \
     --model mae_vit_d64 \
     --norm_pix_loss \
-    --mask_ratio 0.95 \
+    --mask_ratio 0.75 \
     --epochs 2000 \
     --warmup_epochs 40 \
     --blr 1.5e-4 --weight_decay 0.05 \
