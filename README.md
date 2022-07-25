@@ -52,7 +52,7 @@ python main_pretrain.py \
 ### Multi-node Training
 
 ```
-python /home/js4435/project/scmae_01_Zhengmix8eq/code/submitit_pretrain.py \
+python submitit_pretrain.py \
     --nodes 1 \
     --ngpus 2 \
     --timeout 10080 \
@@ -91,7 +91,7 @@ python /home/js4435/project/scmae_01_Zhengmix8eq/code/submitit_pretrain.py \
   export MASTER_ADDR=$master_addr
   echo "MASTER_ADDR="$MASTER_ADDR
   
-  python /home/js4435/project/scmae_01_Zhengmix8eq/code/submitit_pretrain.py \
+  python submitit_pretrain.py \
       --job_dir '' \
       --nodes 1 \
       --ngpus 2 \
