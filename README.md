@@ -4,13 +4,15 @@
 
 1. Zhengmix8eq
 
+   `/home/js4435/scratch60/scTransformer/Zhengmix8eq.h5ad`
+
 2. Genomewide perturb-seq 
 
-   `/home/js4435/scratch60/K562_gwps_normalized_singlecell_01.h5ad`
+   `/home/js4435/scratch60/scTransformer/K562_gwps_normalized_singlecell_01.h5ad`
 
-   `/home/js4435/scratch60/K562_essential_normalized_singlecell_01.h5ad`
+   `/home/js4435/scratch60/scTransformer/K562_essential_normalized_singlecell_01.h5ad`
 
-   `/home/js4435/scratch60/rpe1_normalized_singlecell_01.h5ad`
+   `/home/js4435/scratch60/scTransformer/rpe1_normalized_singlecell_01.h5ad`
 
 #### Format
 
