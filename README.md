@@ -37,8 +37,8 @@
 ```
 python main_pretrain.py \
     --output_dir 0717_Zhengmix8eq \
-    --log_dir 0717_Zhengmix8eq_board \
-    --expr_path /content/drive/Shareddrives/Documentation/Jie_Sheng/Zhengmix8eq/Zhengmix8eq.csv \
+    --log_dir 0717_Zhengmix8eq_tensorboard \
+    --expr_path /content/drive/Shareddrives/Documentation/Jie_Sheng/Zhengmix8eq/zhengmix8eq_scaleddata.csv \
     --meta_path /content/drive/Shareddrives/Documentation/Jie_Sheng/Zhengmix8eq/meta.csv \
     --label_name x \
     --batch_size 8 \
