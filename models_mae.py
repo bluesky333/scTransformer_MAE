@@ -1,14 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# timm: https://github.com/rwightman/pytorch-image-models/tree/master/timm
-# DeiT: https://github.com/facebookresearch/deit
-# --------------------------------------------------------
-
 from functools import partial
 
 import torch
@@ -217,19 +206,14 @@ class MaskedAutoencoderViT(nn.Module):
         return x_masked, mask, ids_restore, ids_shuffle
 
     def forward_encoder(self, x, mask_ratio):
-        B, G = x.shape
-        
-        x = torch.nan_to_num(x)
-#        assert torch.nonzero(torch.isnan(x))!=0
-
-        # embed patches
-        expr = x.reshape(B, G, 1)
+        expr = x[0].unsqueeze(-1)
         expr = self.encoder_embed(expr)
 
         # add pos embed w/o cls token
-        index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
-        pos_embed = self.pos_embed(index)
+        idx = x[1]
+        pos_embed = self.pos_embed(idx)
         x = expr + pos_embed
+        #print(x.shape[1])
 
         # masking: length -> length * mask_ratio
         x, mask, ids_restore, ids_shuffle = self.random_masking(x, mask_ratio)
@@ -246,7 +230,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x, mask, ids_restore, ids_shuffle
 
-    def forward_decoder(self, x, ids_restore, ids_shuffle):
+    def forward_decoder(self, x, idx, ids_restore, ids_shuffle):
         # embed tokens
         x = self.decoder_embed(x)
 
@@ -256,11 +240,12 @@ class MaskedAutoencoderViT(nn.Module):
         x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
 
         # add pos embed
-        assert x_.shape[1] == self.gene_number
-        index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
-        decoder_pos_embed = self.pos_embed(ids_shuffle)
-        decoder_pos_embed = torch.gather(decoder_pos_embed, dim=1, index=ids_restore.unsqueeze(-1).repeat(1,1, decoder_pos_embed.shape[2]))
+        #index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
+        decoder_pos_embed = self.pos_embed(idx)
+        #decoder_pos_embed = torch.gather(decoder_pos_embed, dim=1, index=ids_restore.unsqueeze(-1).repeat(1,1, decoder_pos_embed.shape[2]))
         x = x_ + decoder_pos_embed
+        
+        x = torch.cat([x[:, :1, :], x_], dim=1)
 
         # apply Transformer blocks
         for blk in self.decoder_blocks:
@@ -268,45 +253,41 @@ class MaskedAutoencoderViT(nn.Module):
         x = self.decoder_norm(x)
         
         # predictor projection
-        x = self.decoder_pred(x)
+        x = self.decoder_pred(x)#.sigmoid()
+
+        x = x[:, 1:, :]
 
         return x
 
     def forward_loss(self, x, pred, mask):
         x = torch.nan_to_num(x)
         pred = torch.squeeze(pred)
-        
-        #print(torch.nonzero(torch.isnan(pred)))
-        #print(torch.nonzero(torch.isnan(x)))
-        #print(torch.nonzero(torch.isnan(loss)))
-        #print('loss1: ', loss.sum())
         loss = (((pred - x) ** 2) * mask).sum() / mask.sum()  # mean loss on removed genes
-        #print('loss2: ', loss)
         return loss
 
-    def get_last_selfattention(self, x):
-        B, G = x.shape
-        x = x.reshape(B, G, 1)
-        x = self.encoder_embed(x)
-        index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
-        pos_embed = self.pos_embed(index)
-        x = x + pos_embed
-
-        cls_token = self.cls_token# + self.pos_embed[:, :1, :]
-        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-
-        # apply Transformer blocks
-        for i, blk in enumerate(self.blocks):
-          if i < len(self.blocks) - 1:
-            imgs = blk(x)
-          else:
-            return blk(x, return_attention=True)
+#    def get_last_selfattention(self, x):
+#        B, G = x.shape
+#        x = x.reshape(B, G, 1)
+#        x = self.encoder_embed(x)
+#        index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
+#        pos_embed = self.pos_embed(index)
+#        x = x + pos_embed
+#
+#        cls_token = self.cls_token# + self.pos_embed[:, :1, :]
+#        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+#        x = torch.cat((cls_tokens, x), dim=1)
+#
+#        # apply Transformer blocks
+#        for i, blk in enumerate(self.blocks):
+#          if i < len(self.blocks) - 1:
+#            imgs = blk(x)
+#          else:
+#            return blk(x, return_attention=True)
 
     def forward(self, x, mask_ratio=0.75):
         latent, mask, ids_restore, ids_shuffle = self.forward_encoder(x, mask_ratio)
-        pred = self.forward_decoder(latent, ids_restore, ids_shuffle)  # [N, L, p*p*3]
-        loss = self.forward_loss(x, pred, mask)
+        pred = self.forward_decoder(latent, x[1], ids_restore, ids_shuffle)  # [N, L, p*p*3]
+        loss = self.forward_loss(x[0], pred, mask)
         return loss, pred, mask, latent[:, 0]
 
 
