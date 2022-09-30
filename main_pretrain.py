@@ -1,13 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# DeiT: https://github.com/facebookresearch/deit
-# BEiT: https://github.com/microsoft/unilm/tree/master/beit
-# --------------------------------------------------------
 import argparse
 import datetime
 import json
@@ -131,25 +121,18 @@ def main(args):
     cudnn.benchmark = True
     
     if args.file_type == 'CSV':
-      expr = pd.read_csv(args.expr_path, index_col=0)
-      meta = pd.read_csv(args.meta_path, index_col=0)
-      gene_number = expr.shape[0]
-      print(f'This dataset has {gene_number} genes!')
-      dataset = scRNACSV(expr, meta, args.label_name, instance=False)
+      dataset = scRNACSV(args.expr_path, args.meta_path, args.label_name, 
+                         instance=False, 
+                         transform = NoneZero())
     if args.file_type == 'h5ad':
-      h5ad = anndata.read_h5ad(args.h5ad_path)
-      gene_number = h5ad.shape[1]
-      cell_number = h5ad.shape[0]
-      print(f'This dataset has {gene_number} genes!')
-      print(f'This dataset has {cell_number} cells!')
-      print(np.sum(np.isnan(h5ad.X)))
-      dataset = scRNAh5ad(h5ad, args.label_name, instance=False)
-    
+      dataset = scRNAh5ad(args.h5ad_path, args.label_name, 
+                          instance=False, 
+                          transform = NoneZero())
+    gene_number = dataset.gene_number
     trainset_length = int(len(dataset) * 0.8)
     testset_length = len(dataset) - trainset_length
     dataset_train, datasetset_test = torch.utils.data.random_split(dataset, [trainset_length, testset_length],
                                                      generator=torch.Generator().manual_seed(args.seed))
-    
     print(dataset_train)
 
     if True:  # args.distributed:
@@ -174,6 +157,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        collate_fn=PadCollate(gene_number=gene_number),
     )
     
     # define the model
