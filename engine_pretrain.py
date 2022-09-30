@@ -1,13 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# DeiT: https://github.com/facebookresearch/deit
-# BEiT: https://github.com/microsoft/unilm/tree/master/beit
-# --------------------------------------------------------
 import math
 import sys
 from typing import Iterable
@@ -42,10 +32,11 @@ def train_one_epoch(model: torch.nn.Module,
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
-        samples = samples.to(device, non_blocking=True)
-
+        samples[0], samples[1] = samples[0].to(device, non_blocking=True), samples[1].to(device, non_blocking=True)
+        
         with torch.cuda.amp.autocast():
             loss, _, _, _ = model(samples, mask_ratio=args.mask_ratio)
+
 
         loss_value = loss.item()
 
