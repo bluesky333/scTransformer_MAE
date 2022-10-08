@@ -8,5 +8,9 @@ scikit-learn
 pycocotools
 matplotlib
 pandas
-timm==0.3.2
+timm==0.4.5
 tensorboard
+umap-learn
+scprep
+anndata
+local-attention
