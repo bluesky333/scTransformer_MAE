@@ -13,3 +13,4 @@ tensorboard
 umap-learn
 scprep
 anndata
+local-attention
