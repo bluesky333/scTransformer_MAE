@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 from torch.nn.init import xavier_normal_
 
+from local_attention import LocalAttention
+from functools import partial
+
 #from timm.models.vision_transformer import PatchEmbed, Block
 
 #from util.pos_embed import get_2d_sincos_pos_embed
@@ -48,29 +51,83 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
+def split_at_index(dim, index, t):
+    pre_slices = (slice(None),) * dim
+    l = (*pre_slices, slice(None, index))
+    r = (*pre_slices, slice(index, None))
+    return t[l], t[r]
+
+def linear_attn(q, k, v):
+    dim = q.shape[-1]
+
+    q = q.softmax(dim=-1)
+    k = k.softmax(dim=-2)
+
+    q = q * dim ** -0.5
+
+    context = torch.einsum('bhnd,bhne->bhde', k, v)
+    attn = torch.einsum('bhnd,bhde->bhne', q, context)
+    return attn.reshape(*q.shape)
+
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim, n_local_attn_heads = 1, local_attn_window_size = 64, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
         head_dim = dim // num_heads
+        self.head_dim = head_dim
         self.scale = head_dim ** -0.5
-
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.local_attn_window_size = local_attn_window_size
+        self.global_attn_heads = num_heads - n_local_attn_heads
+        self.global_attn_fn = linear_attn
+        self.local_attn_heads = n_local_attn_heads
+        self.local_attn  = LocalAttention(local_attn_window_size, causal = False, dropout = attn_drop)
+        
+        self.q = nn.Linear(dim, dim, bias=qkv_bias)
+        self.kv = nn.Linear(dim, dim, bias=qkv_bias)
+        
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0)   # make torchscript happy (cannot use tensor as tuple)
+        m = self.local_attn_window_size
+        original_N = N
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+        remainder = N % m
+        if remainder > 0:
+            padding = m - (N % m)
+            x = torch.nn.functional.pad(x, (0, 0, padding, 0), value = 0)
+            B, N, C = x.shape
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        q = self.q(x)
+        k = self.kv(x)
+        v = self.kv(x)
+        merge_heads = lambda x: x.reshape(*x.shape[:2], -1, self.head_dim).transpose(1, 2)
+
+        q, k, v = map(merge_heads, (q, k, v))
+
+        split_index_fn = partial(split_at_index, 1, self.local_attn_heads)
+
+        (lq, q), (lk, k), (lv, v) = map(split_index_fn, (q, k, v))
+        
+        has_local, has_global = map(lambda x: x.shape[1] > 0, (lq, q))
+
+        out = []
+
+        if has_local:
+            local_out = self.local_attn(lq, lk, lv)
+            out.append(local_out)
+
+        if has_global:
+            global_out = self.global_attn_fn(q, k, v)
+            out.append(global_out)
+
+        attn = torch.cat(out, dim=1)
+        x = attn.transpose(1, 2).reshape(B, N, -1)
+
+        x = x[:, -original_N:]
         x = self.proj(x)
         x = self.proj_drop(x)
         return x, attn
