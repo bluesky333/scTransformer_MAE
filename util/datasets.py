@@ -125,7 +125,7 @@ class NoneZero(object):
 
 class Collate(object):
     def __init__(self):
-        #self.gene_number = gene_number
+        super().__init__()
 
     def collate(self, batch):
         """
