@@ -124,8 +124,8 @@ class NoneZero(object):
         return cell_list
 
 class Collate(object):
-    def __init__(self, gene_number):
-        self.gene_number = gene_number
+    def __init__(self):
+        #self.gene_number = gene_number
 
     def collate(self, batch):
         """
