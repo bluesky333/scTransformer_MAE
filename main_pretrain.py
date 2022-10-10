@@ -49,6 +49,10 @@ def get_args_parser():
     parser.add_argument('--norm_pix_loss', action='store_true',
                         help='Use (per-patch) normalized pixels as targets for computing loss')
     parser.set_defaults(norm_pix_loss=False)
+    
+    parser.add_argument('--transform', default='None', type=str,
+                        choices=['None', 'NoneZero'],
+                        help='Use gene downsampling')
 
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
@@ -119,15 +123,21 @@ def main(args):
     np.random.seed(seed)
 
     cudnn.benchmark = True
-    
+ 
+    if args.transform == 'NoneZero':
+      transform = NoneZero()
+    elif args.transform == 'None':
+      transform = None
+
     if args.file_type == 'CSV':
       dataset = scRNACSV(args.expr_path, args.meta_path, args.label_name, 
                          instance=False, 
-                         transform = NoneZero())
+                         transform = transform)
+
     if args.file_type == 'h5ad':
       dataset = scRNAh5ad(args.h5ad_path, args.label_name, 
                           instance=False, 
-                          transform = NoneZero())
+                          transform = transform)
     gene_number = dataset.gene_number
     trainset_length = int(len(dataset) * 0.8)
     testset_length = len(dataset) - trainset_length
@@ -151,15 +161,22 @@ def main(args):
     else:
         log_writer = None
 
-    data_loader_train = torch.utils.data.DataLoader(
+    if args.transform == 'None':
+      data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn=PadCollate(gene_number=gene_number),
-    )
-    
+        collate_fn=Collate(gene_number = gene_number),)
+    elif args.transform == 'NoneZero':
+      data_loader_train = torch.utils.data.DataLoader(
+        dataset_train, sampler=sampler_train,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=True,
+        collate_fn=PadCollate(gene_number=gene_number),)    
     # define the model
     model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,
 #                                            gene_embed_dim=args.gene_embed_dim,
