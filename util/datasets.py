@@ -109,6 +109,7 @@ class scRNAh5ad(Dataset):
 
     if self.ifInstance:
       return ret, idx
+
     else:
       return ret, lab
 
@@ -121,6 +122,30 @@ class NoneZero(object):
         cell_list = [cell[nonzero_idx],nonzero_idx]
         
         return cell_list
+
+class Collate(object):
+    def __init__(self, gene_number):
+        self.gene_number = gene_number
+
+    def collate(self, batch):
+        """
+        args:
+            batch - list of (expression, label)
+
+        reutrn:
+            expr - a tensor of all cells' gene expression in 'batch' 
+            ind - a tensor of all cells' gene indices in 'batch' 
+            labs - a LongTensor of all labels in batch
+        """
+        expr = torch.stack([x[0] for x in batch])
+        ind = torch.LongTensor([range(self.gene_number)]*len(batch))
+        lab = [y[1] for y in batch]
+        
+        return [expr, ind], lab
+
+    def __call__(self, batch):
+        return self.collate(batch)
+
 
 class PadCollate(object):
     def __init__(self, gene_number):
@@ -143,7 +168,6 @@ class PadCollate(object):
 
         # pad according to max_len
         expr = pad_expression(expr)
-        #ind = pad_index(ind, self.gene_number)
         ind = pad_index(ind, self.gene_number)
         
         return [expr, ind], lab
@@ -154,7 +178,6 @@ class PadCollate(object):
 def pad_expression(x):
     seq_lens= torch.LongTensor(list(map(len, x)))
     seq_tensor = torch.zeros((len(x),seq_lens.max()))
-    #seq_tensor = Variable(torch.zeros((len(x),seq_lens.max())))
     for idx, (seq, seqlen) in enumerate(zip(x, seq_lens)):
         seq_tensor[idx, :seqlen] = torch.Tensor(seq)
     return seq_tensor
