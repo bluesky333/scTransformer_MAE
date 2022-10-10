@@ -168,7 +168,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn=Collate(gene_number = gene_number),)
+        collate_fn=Collate(),)
     elif args.transform == 'NoneZero':
       data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
