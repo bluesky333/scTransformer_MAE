@@ -68,6 +68,7 @@ class scRNAh5ad(Dataset):
     self.h5ad = anndata.read_h5ad(h5ad_path)
     #self.expr = torch.from_numpy(self.h5ad.X.T).float()
     self.meta = self.h5ad.obs
+    self.gene_number = (self.h5ad).shape[1]
 
     # Cells are the column names of the expr, labels is a column of the meta data
     self.cells = list(self.h5ad.obs.index.values)
