@@ -3,6 +3,7 @@ import os
 from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
+from random import choices
 import anndata
 from itertools import accumulate
 import torch
@@ -147,10 +148,10 @@ class Collate(object):
     def __call__(self, batch):
         return self.collate(batch)
 
-
 class PadCollate(object):
-    def __init__(self, gene_number):
+    def __init__(self, gene_number,sample_gene_len):
         self.gene_number = gene_number
+        self.sample_gene_len = sample_gene_len
 
     def pad_collate(self, batch):
         """
@@ -167,11 +168,17 @@ class PadCollate(object):
         ind = [x[0][1] for x in batch]
         lab = [y[1] for y in batch]
 
-        # pad according to max_len
-        expr = pad_expression(expr)
-        ind = pad_index(ind, self.gene_number)
-        
-        return [expr, ind], lab
+        if self.sample_gene_len == None:
+          # pad according to max_len
+          padded_expr = pad_expression(expr)
+          padded_ind = pad_index(ind, self.gene_number)
+        else: 
+          # random sampling
+          padded_ind = [choices(range(len(idx)),k=self.sample_gene_len) for idx in ind]
+          padded_expr = torch.FloatTensor([[expr[c][si] for si in padded_ind[c]] for c in range(len(expr))])
+          padded_ind = torch.LongTensor([[ind[c][si] for si in padded_ind[c]] for c in range(len(ind))])
+             
+        return [padded_expr, padded_ind], lab
 
     def __call__(self, batch):
         return self.pad_collate(batch)
