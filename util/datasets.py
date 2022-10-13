@@ -174,9 +174,9 @@ class PadCollate(object):
           padded_ind = pad_index(ind, self.gene_number)
         else: 
           # random sampling
-          padded_ind = [choices(range(len(idx)),k=self.sample_gene_len) for idx in ind]
+          sample_idx = [choices(range(len(idx)),k=self.sample_gene_len) for idx in ind]
           padded_expr = torch.FloatTensor([[expr[c][si] for si in padded_ind[c]] for c in range(len(expr))])
-          padded_ind = torch.LongTensor([[ind[c][si] for si in padded_ind[c]] for c in range(len(ind))])
+          padded_ind = torch.LongTensor([[ind[c][si] for si in sample_idx[c]] for c in range(len(ind))])
              
         return [padded_expr, padded_ind], lab
 
