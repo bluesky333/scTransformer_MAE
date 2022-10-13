@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 from torch.nn.init import xavier_normal_
 
-from local_attention import LocalAttention
-from functools import partial
+from einops import rearrange, reduce
+import math
 
 #from timm.models.vision_transformer import PatchEmbed, Block
 
@@ -51,40 +51,36 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
-def split_at_index(dim, index, t):
-    pre_slices = (slice(None),) * dim
-    l = (*pre_slices, slice(None, index))
-    r = (*pre_slices, slice(index, None))
-    return t[l], t[r]
+def moore_penrose_iter_pinv(x, iters = 6):
+    device = x.device
 
-def linear_attn(q, k, v):
-    dim = q.shape[-1]
+    abs_x = torch.abs(x)
+    col = abs_x.sum(dim = -1)
+    row = abs_x.sum(dim = -2)
+    z = rearrange(x, '... i j -> ... j i') / (torch.max(col) * torch.max(row))
 
-    q = q.softmax(dim=-1)
-    k = k.softmax(dim=-2)
+    I = torch.eye(x.shape[-1], device = device)
+    I = rearrange(I, 'i j -> () i j')
 
-    q = q * dim ** -0.5
+    for _ in range(iters):
+        xz = x @ z
+        z = 0.25 * z @ (13 * I - (xz @ (15 * I - (xz @ (7 * I - xz)))))
 
-    context = torch.einsum('bhnd,bhne->bhde', k, v)
-    attn = torch.einsum('bhnd,bhde->bhne', q, context)
-    return attn.reshape(*q.shape)
+    return z
 
 class Attention(nn.Module):
-    def __init__(self, dim, n_local_attn_heads = 1, local_attn_window_size = 64, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim, num_landmarks = 64, pinv_iterations = 6, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.head_dim = head_dim
         self.scale = head_dim ** -0.5
-        self.local_attn_window_size = local_attn_window_size
-        self.global_attn_heads = num_heads - n_local_attn_heads
-        self.global_attn_fn = linear_attn
-        self.local_attn_heads = n_local_attn_heads
-        self.local_attn  = LocalAttention(local_attn_window_size, causal = False, dropout = attn_drop)
-        
-        self.q = nn.Linear(dim, dim, bias=qkv_bias)
-        self.kv = nn.Linear(dim, dim, bias=qkv_bias)
+
+        self.num_landmarks = num_landmarks
+        self.pinv_iterations = pinv_iterations
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
@@ -92,8 +88,8 @@ class Attention(nn.Module):
 
     def forward(self, x):
         B, N, C = x.shape
-        m = self.local_attn_window_size
         original_N = N
+        m, iters = self.num_landmarks, self.pinv_iterations
 
         remainder = N % m
         if remainder > 0:
@@ -101,32 +97,30 @@ class Attention(nn.Module):
             x = torch.nn.functional.pad(x, (0, 0, padding, 0), value = 0)
             B, N, C = x.shape
 
-        q = self.q(x)
-        k = self.kv(x)
-        v = self.kv(x)
-        merge_heads = lambda x: x.reshape(*x.shape[:2], -1, self.head_dim).transpose(1, 2)
+        q, k, v = self.qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.num_heads), (q, k, v))
 
-        q, k, v = map(merge_heads, (q, k, v))
+        q = q * self.scale
 
-        split_index_fn = partial(split_at_index, 1, self.local_attn_heads)
-
-        (lq, q), (lk, k), (lv, v) = map(split_index_fn, (q, k, v))
+        l = math.ceil(N / m)
+        landmark_einops_eq = '... (n l) d -> ... n d'
+        q_landmarks = reduce(q, landmark_einops_eq, 'sum', l = l)
+        k_landmarks = reduce(k, landmark_einops_eq, 'sum', l = l)
+        q_landmarks /= l
+        k_landmarks /= l
         
-        has_local, has_global = map(lambda x: x.shape[1] > 0, (lq, q))
+        einops_eq = '... i d, ... j d -> ... i j'
+        sim1 = torch.einsum(einops_eq, q, k_landmarks)
+        sim2 = torch.einsum(einops_eq, q_landmarks, k_landmarks)
+        sim3 = torch.einsum(einops_eq, q_landmarks, k)
 
-        out = []
-
-        if has_local:
-            local_out = self.local_attn(lq, lk, lv)
-            out.append(local_out)
-
-        if has_global:
-            global_out = self.global_attn_fn(q, k, v)
-            out.append(global_out)
-
-        attn = torch.cat(out, dim=1)
-        x = attn.transpose(1, 2).reshape(B, N, -1)
-
+        attn1, attn2, attn3 = map(lambda t: t.softmax(dim = -1), (sim1, sim2, sim3))
+        attn2_inv = moore_penrose_iter_pinv(attn2, iters)
+        
+        attn = attn1 @ attn2_inv @ attn3
+        
+        x = (attn1 @ attn2_inv) @ (attn3 @ v)
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = x[:, -original_N:]
         x = self.proj(x)
         x = self.proj_drop(x)
