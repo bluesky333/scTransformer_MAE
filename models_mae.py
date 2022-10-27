@@ -7,51 +7,68 @@ from torch.nn.init import xavier_normal_
 from einops import rearrange, reduce
 import math
 
-#from timm.models.vision_transformer import PatchEmbed, Block
 
-#from util.pos_embed import get_2d_sincos_pos_embed
+# class LayerScale(nn.Module):
+#     def __init__(self, dim, init_values=1e-5, inplace=False):
+#         super().__init__()
+#         self.inplace = inplace
+#         self.gamma = nn.Parameter(init_values * torch.ones(dim))
 
-def drop_path(x, drop_prob: float = 0., training: bool = False):
-    if drop_prob == 0. or not training:
-        return x
-    keep_prob = 1 - drop_prob
-    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
-    random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
-    random_tensor.floor_()  # binarize
-    output = x.div(keep_prob) * random_tensor
-    return output
-
-class DropPath(nn.Module):
-    """
-    Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
-    """
-    def __init__(self, drop_prob=None):
-        super(DropPath, self).__init__()
-        self.drop_prob = drop_prob
-
-    def forward(self, x):
-        return drop_path(x, self.drop_prob, self.training)
+#     def forward(self, x):
+#         return x.mul_(self.gamma) if self.inplace else x * self.gamma
 
 
-class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+# def drop_path(x, drop_prob: float = 0., training: bool = False):
+#     if drop_prob == 0. or not training:
+#         return x
+#     keep_prob = 1 - drop_prob
+#     shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
+#     random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+#     random_tensor.floor_()  # binarize
+#     output = x.div(keep_prob) * random_tensor
+#     return output
+
+# class DropPath(nn.Module):
+#     """
+#     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
+#     """
+#     def __init__(self, drop_prob=None):
+#         super(DropPath, self).__init__()
+#         self.drop_prob = drop_prob
+
+#     def forward(self, x):
+#         return drop_path(x, self.drop_prob, self.training)
+
+
+class MLP(nn.Module):
+    def __init__(self, 
+                 in_features, 
+                 hidden_features=None, 
+                 out_features=None, 
+                 act_layer=nn.GELU, 
+                 drop=0.
+        ):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
+        # self.drop = nn.Dropout(drop)
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.act(x)
-        x = self.drop(x)
+        # x = self.drop(x)
         x = self.fc2(x)
-        x = self.drop(x)
+        # x = self.drop(x)
         return x
 
+
 def moore_penrose_iter_pinv(x, iters = 6):
+    """
+    Helper function for Nystformer Attention
+    """
     device = x.device
 
     abs_x = torch.abs(x)
@@ -68,21 +85,31 @@ def moore_penrose_iter_pinv(x, iters = 6):
 
     return z
 
+
 class Attention(nn.Module):
-    def __init__(self, dim, num_landmarks = 64, pinv_iterations = 6, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, 
+                 dim, 
+                 num_landmarks = 64, 
+                 pinv_iterations = 6, 
+                 num_heads=8, 
+                 qkv_bias=False, 
+                 proj_drop=0.):
+        """
+        Attention Module
+
+        (ToDo: Yunsoo, Nystroformer linear attention)
+        """
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.head_dim = head_dim
         self.scale = head_dim ** -0.5
-
         self.num_landmarks = num_landmarks
         self.pinv_iterations = pinv_iterations
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         
-        self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
@@ -126,96 +153,120 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x, attn
 
+
 class Block(nn.Module):
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+    def __init__(self, 
+                 dim, 
+                 num_heads, 
+                 mlp_ratio=4., 
+                 qkv_bias=False, 
+                 drop=0., 
+                #  drop_path=0., 
+                 act_layer=nn.GELU, 
+                 norm_layer=nn.LayerNorm
+                 ):
+        """
+        Arguments:
+            dim: dimension of Block
+            num_heads: number of heads to use in Attention
+            mlp_ratio: multiplier for MLP hidden dimension
+            qkv_bias: whether or not to have bias in qkv attention
+            drop: dropout rate to use in Attention projection
+            act_layer: activation layer to use in Block
+            norm_layer: normalization layer to use in Block
+        """
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+            dim, 
+            num_heads=num_heads, 
+            qkv_bias=qkv_bias, 
+            proj_drop=drop)
+        # self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        # self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        
         self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
+        # self.ls2 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        # self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
     def forward(self, x, return_attention=False):
         y, attn = self.attn(self.norm1(x))
         if return_attention:
             return attn
-        x = x + self.drop_path(y)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        # x = x + self.drop_path(y)
+        # x = x + self.drop_path(self.mlp(self.norm2(x)))
+        x = x + self.mlp(self.norm2(y))  # skip connection
         return x
 
+
 class MaskedAutoencoderViT(nn.Module):
-    """ 
-    Masked Autoencoder with VisionTransformer backbone
-    """
-    def __init__(self, 
-                 embed_dim=1024, 
-                 depth=24, 
-                 num_heads=16,
-                 decoder_embed_dim=512, 
-                 decoder_depth=8, 
-                 decoder_num_heads=16,
-                 mlp_ratio=4., 
-                 norm_layer=nn.LayerNorm,
-                 gene_number=2000, 
-                 gene_embed_dim=64, 
-                 norm_pix_loss=False):
+    def __init__(self,
+                 embed_dim: int=1024,
+                 depth: int=24,
+                 num_heads: int=16,
+                 decoder_embed_dim: int=512,
+                 decoder_depth: int=8,
+                 decoder_num_heads: int=16,
+                 mlp_ratio: float=4.,
+                 norm_layer: nn.Module=nn.LayerNorm,
+                 num_genes: int=2000,
+                 ):
+        """
+        Constructor for MaskedAutoencoderViT module for gene data.
+
+        Arguments:
+            embed_dim:              embedding dimension for MAE encoder (default: 1024)
+            depth:                  number of layers of Multihead Attention in the encoder (default: 24)
+            num_heads:              number of heads to use in Multihead Attention (default: 16)
+            decoder_embed_dim:      embedding dimension of the decoder (default: 512)
+            decoder_depth:          number of layers of Multihead Attention in the decoder (default: 8)
+            decoder_num_heads:      number of heads to use in decoder Multihead Attention (default: 16)
+            mlp_ratio:              multiplier to use for MLP hidden dimension (default: 4.)
+            norm_layer:             normalization layer to use (default: nn.LayerNorm)
+            num_genes:              number of genes per cell (default: 2000)
+
+        """
         super().__init__()
+        #### Masked Autencoder ####
+        self.embed_dim = embed_dim
+        self.depth = depth
+        self.num_heads = num_heads
+        self.decoder_embed_dim = decoder_embed_dim
+        self.decoder_depth = decoder_depth
+        self.decoder_num_heads = decoder_num_heads
+        self.mlp_ratio = mlp_ratio
+        self.norm_layer = norm_layer
+        self.num_genes = num_genes
+        self.gene_index_embed = nn.Embedding(self.num_genes, self.embed_dim)  # *** FLAG: have room for 1 gene embedding for CLS token identity
 
-        # --------------------------------------------------------------------------
-        # MAE
-        num_features = self.embed_dim = embed_dim
-        assert embed_dim == gene_embed_dim
-        assert decoder_embed_dim == gene_embed_dim
-        encoder_dim = embed_dim #+ gene_embed_dim
-        decoder_dim = decoder_embed_dim #+ gene_embed_dim
-        self.gene_number = gene_number
-        self.pos_embed = nn.Embedding(self.gene_number, gene_embed_dim)
-        #self.noise = GaussianNoise()
-        # --------------------------------------------------------------------------
+        #### MAE Encoder ####
+        self.cls_token = nn.Parameter(-1 * torch.ones(1, 1, self.embed_dim))  # *** FLAG: do we need to initialize to -1s or 1s, check if data is being normalized this way. Change back to init to torch.zeros() if not normalizing this way
+        self.expression_embedding = nn.Linear(1, self.embed_dim, bias=True)
+        self.norm = self.norm_layer(self.embed_dim)
 
-        # --------------------------------------------------------------------------
-        # MAE encoder specifics
-
-        self.cls_token = nn.Parameter(-1 * torch.ones(1, 1, encoder_dim))
-
-        self.blocks = nn.ModuleList([
-            Block(encoder_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
-            for i in range(depth)])
-        self.norm = norm_layer(encoder_dim)
-        self.encoder_embed = nn.Linear(1, embed_dim, bias=True)
-        # --------------------------------------------------------------------------
-
-        # --------------------------------------------------------------------------
-        # MAE decoder specifics
-        self.decoder_embed = nn.Linear(encoder_dim, decoder_embed_dim, bias=True)
-
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
-
+        #### MAE Decoder ####
+        self.decoder_embed = nn.Linear(self.embed_dim, self.decoder_embed_dim, bias=True)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, self.decoder_embed_dim))
         self.decoder_blocks = nn.ModuleList([
-            Block(decoder_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
-            for i in range(decoder_depth)])
+            Block(self.decoder_embed_dim, self.decoder_num_heads, self.mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=self.norm_layer)
+            for i in range(self.decoder_depth)])
 
-        self.decoder_norm = norm_layer(decoder_dim)
+        self.decoder_norm = norm_layer(self.decoder_embed_dim)
+        self.decoder_pred = nn.Linear(self.decoder_embed_dim, 1, bias=True)  # Predict back to gene expression value
 
-        self.decoder_pred = nn.Linear(decoder_dim, 1, bias=True) # decoder to pixel
-        # --------------------------------------------------------------------------
-
-        self.norm_pix_loss = norm_pix_loss
-
+        #### Initialize weights ####
         self.initialize_weights()
 
+
     def initialize_weights(self):
-        # initialization
         # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
         torch.nn.init.normal_(self.cls_token, std=.02)
         torch.nn.init.normal_(self.mask_token, std=.02)
 
         # initialize nn.Linear and nn.LayerNorm
         self.apply(self._init_weights)
-
+    
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             # we use xavier_uniform following official JAX ViT:
@@ -235,7 +286,6 @@ class MaskedAutoencoderViT(nn.Module):
         x: [N, L, D], sequence
         """
         N, L, D = x.shape  # batch, length, dim
-        # length: number of patches; (i.e., number of features)
         len_keep = int(L * (1 - mask_ratio))
         
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
@@ -254,24 +304,22 @@ class MaskedAutoencoderViT(nn.Module):
         # unshuffle to get the binary mask
         mask = torch.gather(mask, dim=1, index=ids_restore)
 
-        return x_masked, mask, ids_restore, ids_shuffle
+        return x_masked, mask, ids_restore
 
     def forward_encoder(self, x, mask_ratio):
+        # embed patches
         expr = x[0].unsqueeze(-1)
-        expr = self.encoder_embed(expr)
+        expression_emb = self.expression_embedding(expr)
 
         # add pos embed w/o cls token
-        idx = x[1]
-        pos_embed = self.pos_embed(idx)
-        x = expr + pos_embed
-        #print(x.shape[1])
+        gene_idx = x[1]
+        x = expression_emb + self.gene_index_embed(gene_idx)
 
         # masking: length -> length * mask_ratio
-        x, mask, ids_restore, ids_shuffle = self.random_masking(x, mask_ratio)
+        x, mask, ids_restore = self.random_masking(x, mask_ratio)  # *** FLAG: do we need to add self.gene_idx_embedding[:, :1, :] and add one space in gene idx embedding to have the identity of the CLS token
 
         # append cls token
-        cls_token = self.cls_token# + self.pos_embed[:, :1, :]
-        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
 
         # apply Transformer blocks
@@ -279,95 +327,13 @@ class MaskedAutoencoderViT(nn.Module):
             x = blk(x)
         x = self.norm(x)
 
-        return x, mask, ids_restore, ids_shuffle
+        return x, mask, ids_restore
 
     def forward_decoder(self, x, idx, ids_restore, ids_shuffle):
-        # embed tokens
-        x = self.decoder_embed(x)
-
-        # append mask tokens to sequence
-        mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
-        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
-        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
-
-        # add pos embed
-        #index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
-        decoder_pos_embed = self.pos_embed(idx)
-        #decoder_pos_embed = torch.gather(decoder_pos_embed, dim=1, index=ids_restore.unsqueeze(-1).repeat(1,1, decoder_pos_embed.shape[2]))
-        x = x_ + decoder_pos_embed
-        
-        x = torch.cat([x[:, :1, :], x_], dim=1)
-
-        # apply Transformer blocks
-        for blk in self.decoder_blocks:
-            x = blk(x)
-        x = self.decoder_norm(x)
-        
-        # predictor projection
-        x = self.decoder_pred(x)#.sigmoid()
-
-        x = x[:, 1:, :]
-
-        return x
+        pass
 
     def forward_loss(self, x, pred, mask):
-        x = torch.nan_to_num(x)
-        pred = torch.squeeze(pred)
-        loss = (((pred - x) ** 2) * mask).sum() / mask.sum()  # mean loss on removed genes
-        return loss
-
-#    def get_last_selfattention(self, x):
-#        B, G = x.shape
-#        x = x.reshape(B, G, 1)
-#        x = self.encoder_embed(x)
-#        index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
-#        pos_embed = self.pos_embed(index)
-#        x = x + pos_embed
-#
-#        cls_token = self.cls_token# + self.pos_embed[:, :1, :]
-#        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-#        x = torch.cat((cls_tokens, x), dim=1)
-#
-#        # apply Transformer blocks
-#        for i, blk in enumerate(self.blocks):
-#          if i < len(self.blocks) - 1:
-#            imgs = blk(x)
-#          else:
-#            return blk(x, return_attention=True)
+        pass
 
     def forward(self, x, mask_ratio=0.75):
-        latent, mask, ids_restore, ids_shuffle = self.forward_encoder(x, mask_ratio)
-        pred = self.forward_decoder(latent, x[1], ids_restore, ids_shuffle)  # [N, L, p*p*3]
-        loss = self.forward_loss(x[0], pred, mask)
-        return loss, pred, mask, latent[:, 0]
-
-
-def mae_vit_test(**kwargs):
-    model = MaskedAutoencoderViT(
-        embed_dim=256, depth=8, num_heads=2,
-        decoder_embed_dim=256, decoder_depth=2, decoder_num_heads=2,
-        #gene_embed_dim=8,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-def mae_vit_d128(**kwargs):
-    model = MaskedAutoencoderViT(
-        embed_dim=128, depth=8, num_heads=2,
-        decoder_embed_dim=128, decoder_depth=2, decoder_num_heads=2,
-        gene_embed_dim=128,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-def mae_vit_d64(**kwargs):
-    model = MaskedAutoencoderViT(
-        embed_dim=64, depth=4, num_heads=2,
-        decoder_embed_dim=64, decoder_depth=2, decoder_num_heads=2,
-        gene_embed_dim=64,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-# set recommended archs
-mae_vit_test = mae_vit_test
-mae_vit_d128 = mae_vit_d128
-mae_vit_d64 = mae_vit_d64
-mae_vit_small = mae_vit_d64
+        pass
