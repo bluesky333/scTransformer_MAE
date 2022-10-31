@@ -238,16 +238,20 @@ class MaskedAutoencoderViT(nn.Module):
         self.mlp_ratio = mlp_ratio
         self.norm_layer = norm_layer
         self.num_genes = num_genes
-        self.gene_index_embed = nn.Embedding(self.num_genes, self.embed_dim)  # *** FLAG: have room for 1 gene embedding for CLS token identity
+        self.gene_index_embed = nn.Embedding(self.num_genes + 1, self.embed_dim)  # -1 is CLS token
 
         #### MAE Encoder ####
-        self.cls_token = nn.Parameter(-1 * torch.ones(1, 1, self.embed_dim))  # *** FLAG: do we need to initialize to -1s or 1s, check if data is being normalized this way. Change back to init to torch.zeros() if not normalizing this way
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         self.expression_embedding = nn.Linear(1, self.embed_dim, bias=True)
         self.norm = self.norm_layer(self.embed_dim)
 
         #### MAE Decoder ####
         self.decoder_embed = nn.Linear(self.embed_dim, self.decoder_embed_dim, bias=True)
+
         self.mask_token = nn.Parameter(torch.zeros(1, 1, self.decoder_embed_dim))
+
+        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_genes + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
+
         self.decoder_blocks = nn.ModuleList([
             Block(self.decoder_embed_dim, self.decoder_num_heads, self.mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=self.norm_layer)
             for i in range(self.decoder_depth)])
@@ -306,21 +310,22 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x_masked, mask, ids_restore
 
-    def forward_encoder(self, x, mask_ratio):
+    def forward_encoder(self, x, mask_ratio):  # x (expr_value, gene_index in [0, N])
         # embed patches
         expr = x[0].unsqueeze(-1)
         expression_emb = self.expression_embedding(expr)
 
         # add pos embed w/o cls token
         gene_idx = x[1]
-        x = expression_emb + self.gene_index_embed(gene_idx)
+        x = expression_emb + self.gene_index_embed(gene_idx)  # self.pos_embed[:, :1, :]
 
         # masking: length -> length * mask_ratio
-        x, mask, ids_restore = self.random_masking(x, mask_ratio)  # *** FLAG: do we need to add self.gene_idx_embedding[:, :1, :] and add one space in gene idx embedding to have the identity of the CLS token
+        x, mask, ids_restore = self.random_masking(x, mask_ratio)
 
         # append cls token
-        cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
+        cls_token = self.cls_token + self.gene_index_embed[-1]
+        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        x = torch.cat((x, cls_tokens), dim=1)
 
         # apply Transformer blocks
         for blk in self.blocks:
@@ -329,11 +334,40 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x, mask, ids_restore
 
-    def forward_decoder(self, x, idx, ids_restore, ids_shuffle):
-        pass
+    def forward_decoder(self, x, ids_restore):
+        # embed tokens
+        x = self.decoder_embed(x)
+
+        # append mask tokens to sequence
+        mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
+        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
+        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+
+        # add pos embed
+        x = x + self.decoder_pos_embed  # decoder_pos_embed is [1, self.num_genes + 1, decoder_embed_dim]
+
+        # apply Transformer blocks
+        for blk in self.decoder_blocks:
+            x = blk(x)
+        x = self.decoder_norm(x)
+
+        # predictor projection
+        x = self.decoder_pred(x)
+
+        # remove cls token
+        x = x[:, 1:, :]
+
+        return x
 
     def forward_loss(self, x, pred, mask):
-        pass
+        x = torch.nan_to_num(x)
+        pred = torch.squeeze(pred)
+        loss = (((pred - x) ** 2) * mask).sum() / mask.sum()  # mean loss on removed genes
+        return loss
 
-    def forward(self, x, mask_ratio=0.75):
-        pass
+    def forward(self, x, mask_ratio=0.25):  # 0.5
+        latent, mask, ids_restore = self.forward_encoder(x, mask_ratio)
+        pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
+        loss = self.forward_loss(x[0], pred, mask)
+        return loss, pred, mask, latent[:, 0]

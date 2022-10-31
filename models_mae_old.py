@@ -246,7 +246,7 @@ class MaskedAutoencoderViT(nn.Module):
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
         # keep the first subset
-        ids_keep = ids_shuffle[:, :len_keep]
+        ids_keep = ids_shuffle[:, :len_keep]  # taking first %
         x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
 
         # generate the binary mask: 0 is keep, 1 is remove
@@ -273,7 +273,7 @@ class MaskedAutoencoderViT(nn.Module):
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
         cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
+        x = torch.cat((x, cls_tokens), dim=1)
 
         # apply Transformer blocks
         for blk in self.blocks:
@@ -283,7 +283,7 @@ class MaskedAutoencoderViT(nn.Module):
         return x, mask, ids_restore, ids_shuffle
 
     def forward_decoder(self, x, idx, ids_restore, ids_shuffle):
-        # embed tokens
+        # embed tokens  x is [cells, features, emb_dim]
         x = self.decoder_embed(x)
 
         # append mask tokens to sequence
@@ -294,7 +294,7 @@ class MaskedAutoencoderViT(nn.Module):
         # add pos embed
         #index = torch.tensor(range(self.gene_number),device=x.device).repeat(x.shape[0],1)
         decoder_pos_embed = self.pos_embed(idx)
-        #decoder_pos_embed = torch.gather(decoder_pos_embed, dim=1, index=ids_restore.unsqueeze(-1).repeat(1,1, decoder_pos_embed.shape[2]))
+        decoder_pos_embed = torch.gather(decoder_pos_embed, dim=1, index=ids_restore.unsqueeze(-1).repeat(1,1, decoder_pos_embed.shape[2]))
         x = x_ + decoder_pos_embed
         
         x = torch.cat([x[:, :1, :], x_], dim=1)
