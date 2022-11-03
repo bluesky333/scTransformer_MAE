@@ -242,6 +242,9 @@ class MaskedAutoencoderViT(nn.Module):
 
         #### MAE Encoder ####
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+        self.blocks = nn.ModuleList([
+            Block(self.embed_dim, self.num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+            for _ in range(depth)])  # qk_scale=None,
         self.expression_embedding = nn.Linear(1, self.embed_dim, bias=True)
         self.norm = self.norm_layer(self.embed_dim)
 
@@ -253,7 +256,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_genes + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
         self.decoder_blocks = nn.ModuleList([
-            Block(self.decoder_embed_dim, self.decoder_num_heads, self.mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=self.norm_layer)
+            Block(self.decoder_embed_dim, self.decoder_num_heads, self.mlp_ratio, qkv_bias=True, norm_layer=self.norm_layer)  # qk_scale=None, 
             for i in range(self.decoder_depth)])
 
         self.decoder_norm = norm_layer(self.decoder_embed_dim)
@@ -323,7 +326,8 @@ class MaskedAutoencoderViT(nn.Module):
         x, mask, ids_restore = self.random_masking(x, mask_ratio)
 
         # append cls token
-        cls_token = self.cls_token + self.gene_index_embed[-1]
+        index_tensor = torch.LongTensor([self.num_genes])
+        cls_token = self.cls_token + self.gene_index_embed(index_tensor)
         cls_tokens = cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((x, cls_tokens), dim=1)
 
@@ -371,3 +375,35 @@ class MaskedAutoencoderViT(nn.Module):
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
         loss = self.forward_loss(x[0], pred, mask)
         return loss, pred, mask, latent[:, 0]
+
+
+def mae_vit_test(**kwargs):
+    model = MaskedAutoencoderViT(
+        embed_dim=256, depth=8, num_heads=2,
+        decoder_embed_dim=256, decoder_depth=2, decoder_num_heads=2,
+        #gene_embed_dim=8,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+def mae_vit_d128(**kwargs):
+    model = MaskedAutoencoderViT(
+        embed_dim=128, depth=8, num_heads=2,
+        decoder_embed_dim=128, decoder_depth=2, decoder_num_heads=2,
+        # gene_embed_dim=128,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+def mae_vit_d64(**kwargs):
+    model = MaskedAutoencoderViT(
+        embed_dim=64, depth=4, num_heads=2,
+        decoder_embed_dim=64, decoder_depth=2, decoder_num_heads=2,
+        # gene_embed_dim=64,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+# set recommended archs
+mae_vit_test = mae_vit_test
+mae_vit_d128 = mae_vit_d128
+mae_vit_d64 = mae_vit_d64
+mae_vit_small = mae_vit_d64
+
