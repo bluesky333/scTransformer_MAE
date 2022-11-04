@@ -395,8 +395,8 @@ def mae_vit_d128(**kwargs):
 
 def mae_vit_d64(**kwargs):
     model = MaskedAutoencoderViT(
-        embed_dim=64, depth=4, num_heads=2,
-        decoder_embed_dim=64, decoder_depth=2, decoder_num_heads=2,
+        embed_dim=512, depth=4, num_heads=2,
+        decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=2,
         # gene_embed_dim=64,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
