@@ -22,7 +22,7 @@ class flatten(object):
          #inputs = []
          x = self.totensor(x)
         #  x = self.norm(x)
-         x = torch.flatten(x)
+         x = torch.flatten(x).to(device)
          return x
 
 
