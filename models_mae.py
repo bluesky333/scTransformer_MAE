@@ -326,7 +326,7 @@ class MaskedAutoencoderViT(nn.Module):
         x, mask, ids_restore = self.random_masking(x, mask_ratio)
 
         # append cls token
-        index_tensor = torch.LongTensor([self.num_genes])
+        index_tensor = torch.LongTensor([self.num_genes]).to(expr.device)
         cls_token = self.cls_token + self.gene_index_embed(index_tensor)
         cls_tokens = cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((x, cls_tokens), dim=1)

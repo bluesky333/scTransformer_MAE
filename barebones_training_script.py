@@ -97,7 +97,7 @@ for epoch in range(300):
         model.train()  # vals are in [-1, 1]
         optimizer.zero_grad()
 
-        samples = samples.to(device)
+        samples = torch.tensor(samples, dtype=torch.float32).to(device)
 
         loss, pred, mask, latent = model(samples, mask_ratio=0.5)
         loss.backward()
