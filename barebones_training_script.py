@@ -10,6 +10,8 @@ from util.datasets import NoneZero, Collate
 from models_mae import MaskedAutoencoderViT
 import matplotlib.pyplot as plt
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 class flatten(object):
      def __init__(self):
@@ -86,7 +88,7 @@ model = MaskedAutoencoderViT(
     mlp_ratio=4.,
     norm_layer=nn.LayerNorm,
     num_genes=num_genes,
-)
+).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)  # No weight decay
 
 #### Training Loop ####
@@ -94,6 +96,8 @@ for epoch in range(300):
     for batch_idx, (samples, labels) in enumerate(data_loader_train): # samples: [val, indices]
         model.train()  # vals are in [-1, 1]
         optimizer.zero_grad()
+
+        samples = samples.to(device)
 
         loss, pred, mask, latent = model(samples, mask_ratio=0.5)
         loss.backward()
