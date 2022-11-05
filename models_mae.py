@@ -253,7 +253,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.mask_token = nn.Parameter(torch.zeros(1, 1, self.decoder_embed_dim))
 
-        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_genes + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
+        # self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_genes + 1, decoder_embed_dim), requires_grad=True)  # fixed sin-cos embedding
 
         self.decoder_blocks = nn.ModuleList([
             Block(self.decoder_embed_dim, self.decoder_num_heads, self.mlp_ratio, qkv_bias=True, norm_layer=self.norm_layer)  # qk_scale=None, 
@@ -338,7 +338,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x, mask, ids_restore
 
-    def forward_decoder(self, x, ids_restore):
+    def forward_decoder(self, x, gene_idx, ids_restore):
         # embed tokens
         x = self.decoder_embed(x)
 
@@ -346,11 +346,13 @@ class MaskedAutoencoderViT(nn.Module):
         mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
         x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
         x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
+        x_ = x_ + self.gene_index_embed(gene_idx)  # add pos embed
+
+        index_tensor = torch.LongTensor([self.num_genes]).to(x_.device)
+        x[:, :1, :] = x[:, :1, :] + self.gene_index_embed(index_tensor).expand(x_.shape[0], -1, -1) # add cls pos embed
+
         x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
-
-        # add pos embed
-        x = x + self.decoder_pos_embed  # decoder_pos_embed is [1, self.num_genes + 1, decoder_embed_dim]
-
+               
         # apply Transformer blocks
         for blk in self.decoder_blocks:
             x = blk(x)
@@ -372,7 +374,7 @@ class MaskedAutoencoderViT(nn.Module):
 
     def forward(self, x, mask_ratio=0.25):  # 0.5
         latent, mask, ids_restore = self.forward_encoder(x, mask_ratio)
-        pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
+        pred = self.forward_decoder(latent, x[1],ids_restore)  # [N, L, p*p*3]
         loss = self.forward_loss(x[0], pred, mask)
         return loss, pred, mask, latent[:, 0]
 

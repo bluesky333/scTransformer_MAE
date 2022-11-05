@@ -97,7 +97,8 @@ for epoch in range(300):
         model.train()  # vals are in [-1, 1]
         optimizer.zero_grad()
 
-        samples = torch.tensor(samples, dtype=torch.float32).to(device)
+        samples[0] = samples[0].to(device)
+        samples[1] = samples[1].to(device)
 
         loss, pred, mask, latent = model(samples, mask_ratio=0.5)
         loss.backward()
@@ -116,5 +117,5 @@ for epoch in range(300):
 """
 Potential Ideas:
 - Embedding dimension might be too small (64 dim previously)
-- Zero values: can compute loss of all nonzero pixels + a limited number of zero pixels. Want to prevent model from optimizing too much on zero values
+
 """
