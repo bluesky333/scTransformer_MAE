@@ -229,6 +229,7 @@ if __name__ == "__main__":
     if not os.path.exists(SAVE_PATH):
         os.mkdir(SAVE_PATH)
         os.mkdir(IMAGE_SAVE_PATH)
+        os.system("cp barebones_training_script.py {}/".format(SAVE_PATH))
 
     # Logging utility
     LOG_FOUT = open(os.path.join(SAVE_PATH, 'train_log.txt'), 'w')
