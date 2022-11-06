@@ -44,7 +44,7 @@ def calculate_r_squared(pred, images):
     return pearson_r ** 2, pearsonr_np ** 2
 
 
-def plot_predicted_image(pred, images, save_path1, save_path2):
+def plot_predicted_image(pred, images, mask, save_path1, save_path2, save_path3):
     """
     Args:
         pred: [batch_size, 784]
@@ -56,6 +56,12 @@ def plot_predicted_image(pred, images, save_path1, save_path2):
     images = images.detach().cpu().numpy()[0]
     images_reshaped = np.reshape(images, (28, 28))
     plt.imsave(save_path2, images_reshaped)
+
+    mask = mask.detach().cpu().numpy()[0]
+    mask_reshaped = np.reshape(mask, (28, 28))
+    mask_reshaped = 1 - mask_reshaped
+    masked_image = images_reshaped * mask_reshaped
+    plt.imsave(save_path3, masked_image)
 
 
 #### Set seeds for reproducibility ####
@@ -104,14 +110,15 @@ for epoch in range(300):
         loss.backward()
         optimizer.step()
 
-        if batch_idx % 100 == 0:
-            plot_predicted_image(pred, samples[0], 
+        if batch_idx % 20 == 0:
+            plot_predicted_image(pred, samples[0], mask,
                 save_path1="./training_predicted_images/ep{}_batch{}_predicted_img.png".format(epoch, batch_idx),
-                save_path2="./training_predicted_images/ep{}_batch{}_gt_img.png".format(epoch, batch_idx)
+                save_path2="./training_predicted_images/ep{}_batch{}_gt_img.png".format(epoch, batch_idx),
+                save_path3="./training_predicted_images/ep{}_batch{}_masked_img.png".format(epoch, batch_idx)
             )
             r_squared, r_squared_np = calculate_r_squared(pred, samples[0])
 
-            print_str = "Epoch: {}, Batch [{}/{}] | Train Loss: {:.4f}, Train R-squared Scipy: {:.4f}, Train R-squared Numpy: {:.4f}".format(epoch, batch_idx, len(data_loader_train), loss.item(), r_squared, r_squared_np)  # ToDo: r-squared
+            print_str = "Epoch: {}, Batch [{}/{}] | Train Loss: {:.4f}, Train R-squared Scipy: {:.4f}".format(epoch, batch_idx, len(data_loader_train), loss.item(), r_squared)
             print(print_str)
             
 """
