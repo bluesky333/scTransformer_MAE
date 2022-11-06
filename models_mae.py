@@ -344,14 +344,14 @@ class MaskedAutoencoderViT(nn.Module):
 
         # append mask tokens to sequence
         mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
-        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+        x_ = torch.cat([x[:, :-1, :], mask_tokens], dim=1)  # no cls token
         x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
         x_ = x_ + self.gene_index_embed(gene_idx)  # add pos embed
 
         index_tensor = torch.LongTensor([self.num_genes]).to(x_.device)
-        x[:, :1, :] = x[:, :1, :] + self.gene_index_embed(index_tensor).expand(x_.shape[0], -1, -1) # add cls pos embed
+        x[:, -1:, :] = x[:, -1:, :]+self.gene_index_embed(index_tensor).expand(x_.shape[0], -1, -1) # add cls pos embed
 
-        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        x = torch.cat([x_, x[:, -1:, :]], dim=1)  # append cls token
                
         # apply Transformer blocks
         for blk in self.decoder_blocks:
@@ -362,7 +362,7 @@ class MaskedAutoencoderViT(nn.Module):
         x = self.decoder_pred(x)
 
         # remove cls token
-        x = x[:, 1:, :]
+        x = x[:, :-1, :]
 
         return x
 
