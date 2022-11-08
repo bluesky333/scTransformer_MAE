@@ -376,7 +376,7 @@ class MaskedAutoencoderViT(nn.Module):
         latent, mask, ids_restore = self.forward_encoder(x, mask_ratio)
         pred = self.forward_decoder(latent, x[1],ids_restore)  # [N, L, p*p*3]
         loss = self.forward_loss(x[0], pred, mask)
-        return loss, pred, mask, latent[:, 0]
+        return loss, pred, mask, latent[:, -1]
 
 
 def mae_vit_test(**kwargs):
