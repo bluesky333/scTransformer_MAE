@@ -16,8 +16,8 @@ from util.datasets import NoneZero, Collate
 from models_mae import MaskedAutoencoderViT
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-use_amp = torch.cuda.is_available()
-scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+# use_amp = torch.cuda.is_available()
+# scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 seed = 2
 random.seed(seed)
 torch.manual_seed(seed)
@@ -144,14 +144,18 @@ def train(args, model, optimizer, data_loader_train, data_loader_test):
 
             samples[0] = samples[0].to(device)
             samples[1] = samples[1].to(device)
-            
-            # Using mixed precision
-            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
-                loss, pred, mask, latent = model(samples, mask_ratio=0.5)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            loss, pred, mask, latent = model(samples, mask_ratio=0.5)
+            loss.backward()
+            optimizer.step()
+
+            # Using mixed precision
+            # with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+            #     loss, pred, mask, latent = model(samples, mask_ratio=0.5)
+
+            # scaler.scale(loss).backward()
+            # scaler.step(optimizer)
+            # scaler.update()
 
             r_squared = calculate_r_squared(pred, samples[0])
 
