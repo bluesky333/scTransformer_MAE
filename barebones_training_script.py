@@ -155,7 +155,7 @@ def train(args, model, optimizer, data_loader_train, data_loader_test):
             # scaler.step(optimizer)
             # scaler.update()
 
-            train_total_loss += loss.item()  # *samples[0].size(0)
+            train_total_loss += loss.item() * samples[0].size(0)
             train_total_r_squared += calculate_r_squared(pred, samples[0])
         
         plot_predicted_image(
@@ -175,7 +175,7 @@ def train(args, model, optimizer, data_loader_train, data_loader_test):
                 # with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
                 test_loss, test_pred, test_mask, test_latent = model(test_samples, mask_ratio=0.5)
                 
-                test_total_loss += test_loss.item()  # *test_samples[0].size(0)
+                test_total_loss += test_loss.item() * test_samples[0].size(0)
                 test_total_r_squared += calculate_r_squared(test_pred, test_samples[0])
 
         #### Calculate average batch metrics ####
