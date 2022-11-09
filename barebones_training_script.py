@@ -132,14 +132,12 @@ def train(args, model, optimizer, data_loader_train, data_loader_test):
     for epoch in range(args["epochs"]):
         train_total_loss = 0.
         train_total_r_squared = 0.
-        train_total_samples = 0
         test_total_loss = 0.
         test_total_r_squared = 0.
-        test_total_samples = 0
 
         #### Training Loop ####
+        model.train()  # vals are in [-1, 1]
         for batch_idx, (samples, labels) in enumerate(data_loader_train): # samples: [val, indices]
-            model.train()  # vals are in [-1, 1]
             optimizer.zero_grad()
 
             samples[0] = samples[0].to(device)
@@ -157,39 +155,44 @@ def train(args, model, optimizer, data_loader_train, data_loader_test):
             # scaler.step(optimizer)
             # scaler.update()
 
-            r_squared = calculate_r_squared(pred, samples[0])
-
-            train_total_loss += loss.item()
-            train_total_r_squared += r_squared
-            train_total_samples += pred.shape[0]
+            train_total_loss += loss.item()  # *samples[0].size(0)
+            train_total_r_squared += calculate_r_squared(pred, samples[0])
         
-        train_avg_loss = train_total_loss / train_total_samples
-        train_avg_r_squared = train_total_r_squared / train_total_samples
-        
-        #### Testing Loop ####
-        for batch_idx, (samples, labels) in enumerate(data_loader_test):
-            model.eval()  # vals are in [-1, 1]
-            samples[0] = samples[0].to(device)
-            samples[1] = samples[1].to(device)
-
-            test_loss, test_pred, test_mask, test_latent = model(samples, mask_ratio=0.5)
-            
-            test_r_squared = calculate_r_squared(test_pred, samples[0])
-            test_total_loss += test_loss.item()
-            test_total_samples += test_pred.shape[0]
-            test_total_r_squared += test_r_squared
-
-        test_avg_loss = test_total_loss / test_total_samples
-        test_avg_r_squared = test_total_r_squared / test_total_samples
-
-        #### Log once per epoch ####
         plot_predicted_image(
             pred, samples[0], mask,
-            save_path1=os.path.join(IMAGE_SAVE_PATH, "ep{}_batch{}_predicted_img.png".format(epoch, batch_idx)),
-            save_path2=os.path.join(IMAGE_SAVE_PATH, "ep{}_batch{}_gt_img.png".format(epoch, batch_idx)),
-            save_path3=os.path.join(IMAGE_SAVE_PATH, "ep{}_batch{}_masked_img.png".format(epoch, batch_idx))
+            save_path1=os.path.join(IMAGE_SAVE_PATH, "ep{}_predicted_img.png".format(epoch)),
+            save_path2=os.path.join(IMAGE_SAVE_PATH, "ep{}_gt_img.png".format(epoch)),
+            save_path3=os.path.join(IMAGE_SAVE_PATH, "ep{}_masked_img.png".format(epoch))
         )
         
+        #### Testing Loop ####
+        with torch.no_grad():
+            model.eval()  # vals are in [-1, 1]
+            for test_batch_idx, (test_samples, test_labels) in enumerate(data_loader_test):
+                test_samples[0] = test_samples[0].to(device)
+                test_samples[1] = test_samples[1].to(device)
+
+                # with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                test_loss, test_pred, test_mask, test_latent = model(test_samples, mask_ratio=0.5)
+                
+                test_total_loss += test_loss.item()  # *test_samples[0].size(0)
+                test_total_r_squared += calculate_r_squared(test_pred, test_samples[0])
+
+        #### Calculate average batch metrics ####
+        # check that len(data_loader_train.sampler) == (batch_idx + 1), should be the same
+        train_avg_loss = train_total_loss / len(data_loader_train.sampler)
+        test_avg_loss = test_total_loss / len(data_loader_test.sampler)
+        train_avg_r_squared = train_total_r_squared / (batch_idx + 1)
+        test_avg_r_squared = test_total_r_squared / (test_batch_idx + 1)
+
+        plot_predicted_image(
+            test_pred, test_samples[0], mask,
+            save_path1=os.path.join(IMAGE_SAVE_PATH, "ep{}_test_predicted_img.png".format(epoch)),
+            save_path2=os.path.join(IMAGE_SAVE_PATH, "ep{}_test_gt_img.png".format(epoch)),
+            save_path3=os.path.join(IMAGE_SAVE_PATH, "ep{}_test_masked_img.png".format(epoch))
+        )
+        
+        #### Log once per epoch ####
         train_losses_list.append(train_avg_loss)
         train_r_squared_list.append(train_avg_r_squared)
         test_losses_list.append(test_avg_loss)
