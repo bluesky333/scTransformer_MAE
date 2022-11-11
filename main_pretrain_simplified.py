@@ -9,16 +9,11 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import matplotlib.pyplot as plt
-import seaborn as sns
-
-import timm
-
-assert timm.__version__ == "0.4.5"  # version check
-import timm.optim.optim_factory as optim_factory
+# import seaborn as sns
 
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -65,12 +60,14 @@ def get_args_parser():
                         help='learning rate (absolute lr)')
     # parser.add_argument('--blr', type=float, default=1e-3, metavar='LR',
     #                     help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
-    # parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
-    #                     help='lower lr bound for cyclic schedulers that hit 0')
-    # parser.add_argument('--warmup_epochs', type=int, default=40, metavar='N',
-    #                     help='epochs to warmup LR')
+    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
+                        help='lower lr bound for cyclic schedulers that hit 0')
+    parser.add_argument('--warmup_epochs', type=int, default=40, metavar='N',
+                        help='epochs to warmup LR')
 
     # Dataset parameters
+    parser.add_argument('--dataset', default='fashionmnist', type=str,
+                        help='dataset, default = fashionmnist')
     parser.add_argument('--file_type', default='CSV', type=str,
                         help='[CSV] or [h5ad], default = CSV')
     parser.add_argument('--h5ad_path', default='/path/to/h5ad/file/', type=str,
@@ -84,9 +81,9 @@ def get_args_parser():
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='./output_dir',
-                        help='path where to tensorboard log')
-    parser.add_argument('--device', default='cuda',
+    # parser.add_argument('--log_dir', default='./output_dir',
+    #                     help='path where to tensorboard log')
+    parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='', help='resume from checkpoint')
@@ -99,71 +96,71 @@ def get_args_parser():
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
     parser.set_defaults(pin_mem=True)
 
-    # distributed training parameters
-    parser.add_argument('--distributed', default=False, type=bool)
-    parser.add_argument('--world_size', default=1, type=int,
-                        help='number of distributed processes')
-    parser.add_argument('--local_rank', default=-1, type=int)
-    parser.add_argument('--dist_on_itp', action='store_true')
-    parser.add_argument('--dist_url', default='env://',
-                        help='url used to set up distributed training')
-
     return parser
 
 
-def plot_loss_curves(train_losses, val_losses, epoch_count, save_path, model_name):
-    assert len(train_losses) == len(val_losses) == epoch_count, "Unequal sizes in loss curve plotting."
-    time = list(range(epoch_count))
-    visual_df = pd.DataFrame({
-        "Train Loss": train_losses,
-        "Test Loss": val_losses,
-        "Iteration": time
-    })
+# def plot_loss_curves(train_losses, val_losses, epoch_count, save_path, model_name):
+#     assert len(train_losses) == len(val_losses) == epoch_count, "Unequal sizes in loss curve plotting."
+#     time = list(range(epoch_count))
+#     visual_df = pd.DataFrame({
+#         "Train Loss": train_losses,
+#         "Test Loss": val_losses,
+#         "Iteration": time
+#     })
 
-    plt.rcParams.update({'font.size': 16})
-    sns.lineplot(x='Iteration', y='Loss Value', hue='Loss Type', data=pd.melt(visual_df, ['Iteration'], value_name="Loss Value", var_name="Loss Type"))
-    plt.title("{} Loss Curves".format(model_name))
-    filename = "train_val_loss_curves"
-    plt.savefig(os.path.join(save_path, filename + '.png'), bbox_inches='tight', facecolor="white")
-    plt.close()
+#     plt.rcParams.update({'font.size': 16})
+#     sns.lineplot(x='Iteration', y='Loss Value', hue='Loss Type', data=pd.melt(visual_df, ['Iteration'], value_name="Loss Value", var_name="Loss Type"))
+#     plt.title("{} Loss Curves".format(model_name))
+#     filename = "train_val_loss_curves"
+#     plt.savefig(os.path.join(save_path, filename + '.png'), bbox_inches='tight', facecolor="white")
+#     plt.close()
 
-    plt.rcParams.update({'font.size': 16})
-    sns.lineplot(x='Iteration', y='Loss Value', hue='Loss Type', data=pd.melt(visual_df, ['Iteration'], value_name="Loss Value", var_name="Loss Type"))
-    plt.title("{} Loss Curves (Log 10 Scale)".format(model_name))
-    plt.yscale("log")
-    filename = "train_val_loss_curves_logscale"
-    plt.savefig(os.path.join(save_path, filename + '_log.png'), bbox_inches='tight', facecolor="white")
-    plt.close()
+#     plt.rcParams.update({'font.size': 16})
+#     sns.lineplot(x='Iteration', y='Loss Value', hue='Loss Type', data=pd.melt(visual_df, ['Iteration'], value_name="Loss Value", var_name="Loss Type"))
+#     plt.title("{} Loss Curves (Log 10 Scale)".format(model_name))
+#     plt.yscale("log")
+#     filename = "train_val_loss_curves_logscale"
+#     plt.savefig(os.path.join(save_path, filename + '_log.png'), bbox_inches='tight', facecolor="white")
+#     plt.close()
 
 
-def plot_r_squared_curves(train_r_squared, val_r_squared, epoch_count, save_path, model_name):
-    assert len(train_r_squared) == len(val_r_squared) == epoch_count, "Unequal sizes in accuracy curve plotting."
-    time = list(range(epoch_count))
-    visual_df = pd.DataFrame({
-        "Train R-squared": train_r_squared,
-        "Test R-squared": val_r_squared,
-        "Iteration": time
-    })
+# def plot_r_squared_curves(train_r_squared, val_r_squared, epoch_count, save_path, model_name):
+#     assert len(train_r_squared) == len(val_r_squared) == epoch_count, "Unequal sizes in accuracy curve plotting."
+#     time = list(range(epoch_count))
+#     visual_df = pd.DataFrame({
+#         "Train R-squared": train_r_squared,
+#         "Test R-squared": val_r_squared,
+#         "Iteration": time
+#     })
 
-    plt.rcParams.update({'font.size': 16})
-    sns.lineplot(x='Iteration', y='R-squared Value', hue='R-squared Type', data=pd.melt(visual_df, ['Iteration'], value_name="R-squared Value", var_name="R-squared Type"))
-    plt.title("{} R-squared Curves".format(model_name))
-    plt.ylim(0.4, 1.0)
-    filename = "train_val_r_squared_curves"
-    plt.savefig(os.path.join(save_path, filename + '.png'), bbox_inches='tight', facecolor="white")
-    plt.close()
+#     plt.rcParams.update({'font.size': 16})
+#     sns.lineplot(x='Iteration', y='R-squared Value', hue='R-squared Type', data=pd.melt(visual_df, ['Iteration'], value_name="R-squared Value", var_name="R-squared Type"))
+#     plt.title("{} R-squared Curves".format(model_name))
+#     plt.ylim(0.4, 1.0)
+#     filename = "train_val_r_squared_curves"
+#     plt.savefig(os.path.join(save_path, filename + '.png'), bbox_inches='tight', facecolor="white")
+#     plt.close()
+
+
+class flatten(object):
+     def __init__(self):
+         self.totensor = transforms.ToTensor()
+         self.norm = transforms.Normalize(mean=(0.5,), std=(0.5,))
+
+     def __call__(self, x):
+         #inputs = []
+         x = self.totensor(x)
+         x = self.norm(x)
+         x = torch.flatten(x)
+         return x
 
 
 def main(args):
-    # misc.init_distributed_mode(args)
-
-    print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
-
     device = torch.device(args.device)
 
-    # fix the seed for reproducibility
-    seed = args.seed  # + misc.get_rank()
+    # Set seeds
+    seed = args.seed
     torch.manual_seed(seed)
     np.random.seed(seed)
     cudnn.benchmark = True
@@ -173,38 +170,36 @@ def main(args):
     elif args.transform == 'None':
       transform = None
 
-    if args.file_type == 'CSV':
-      dataset = scRNACSV(args.expr_path, args.meta_path, args.label_name, 
-                         instance=False, 
-                         transform = transform)
+    if args.dataset == "fashionmnist":
+        transform = flatten()
+        dataset_train = datasets.FashionMNIST(root = "./data", download = True, train = True, transform=transform)
+        dataset_test = datasets.FashionMNIST(root = "./data", download = True, train = False, transform=transform)
+        
+        gene_number = 784
+    else:
+        if args.file_type == 'CSV':
+            dataset = scRNACSV(args.expr_path, args.meta_path, args.label_name, 
+                            instance=False, 
+                            transform = transform)
 
-    if args.file_type == 'h5ad':
-      dataset = scRNAh5ad(args.h5ad_path, args.label_name, 
-                          instance=False, 
-                          transform = transform)
+        if args.file_type == 'h5ad':
+            dataset = scRNAh5ad(args.h5ad_path, args.label_name, 
+                            instance=False, 
+                            transform = transform)
 
-    
-    gene_number = dataset.gene_number
-    trainset_length = int(len(dataset) * 0.8)
-    testset_length = len(dataset) - trainset_length
-    dataset_train, dataset_test = torch.utils.data.random_split(dataset, [trainset_length, testset_length], generator=torch.Generator().manual_seed(args.seed))
+        gene_number = dataset.gene_number
+        trainset_length = int(len(dataset) * 0.8)
+        testset_length = len(dataset) - trainset_length
+        dataset_train, dataset_test = torch.utils.data.random_split(dataset, [trainset_length, testset_length], generator=torch.Generator().manual_seed(args.seed))
+        print(dataset_train)
+
+
+
     print(dataset_train)
 
-    if args.distributed:
-        num_tasks = misc.get_world_size()
-        global_rank = misc.get_rank()
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
-        print("Sampler_train = %s" % str(sampler_train))
-    else:
-        sampler_train = torch.utils.data.RandomSampler(dataset_train)
+    sampler_train = torch.utils.data.RandomSampler(dataset_train)
 
-    if global_rank == 0 and args.log_dir is not None:
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = SummaryWriter(log_dir=args.log_dir)
-    else:
-        log_writer = None
+    log_writer = None
 
     if args.transform == 'None':
       data_loader_train = torch.utils.data.DataLoader(
@@ -231,57 +226,55 @@ def main(args):
         collate_fn=PadCollate(gene_number=gene_number,sample_gene_len = args.sample_gene_len),)    
         
     # define the model
-    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,
+    model = models_mae.__dict__[args.model](# norm_pix_loss=args.norm_pix_loss,
                                             # gene_embed_dim=args.gene_embed_dim,
-                                            gene_number = gene_number)
+                                            num_genes = gene_number)
     #*** FIX: make args connect to initialization of model
 
     model.to(device)
-    model_without_ddp = model
-    print("Model = %s" % str(model_without_ddp))
+    print("Model = %s" % str(model))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
-    
-    if args.lr is None:  # only base_lr is specified
-        args.lr = args.blr * eff_batch_size / 256
 
     # print("base lr: %.2e" % (args.lr * 256 / eff_batch_size))
     print("actual lr: %.2e" % args.lr)
-
-    print("accumulate grad iterations: %d" % args.accum_iter)
     print("effective batch size: %d" % eff_batch_size)
 
-    if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
-        model_without_ddp = model.module
+    # if args.distributed:
+    #     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+    #     model_without_ddp = model.module
     
     # following timm: set wd as 0 for bias and norm layers
-    param_groups = optim_factory.add_weight_decay(model_without_ddp, args.weight_decay)
-    optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     print(optimizer)
     loss_scaler = NativeScaler()
-    misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
+    # misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
+    # *** FIX: add in resuming if conditional to load model checkpoint.
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
+    # train_loss_list = []
+    # test_loss_list = []
+    # train_r_squared_list = []
+    # test_r_squared_list = []
+
     for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            data_loader_train.sampler.set_epoch(epoch)
         train_stats = train_one_epoch(
-            model, data_loader_train, data_loader_test,
+            model, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             log_writer=log_writer,
             args=args
         )
-        if args.output_dir and (epoch % 100 == 0 or epoch + 1 == args.epochs):
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch)
-
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,}
 
-        if args.output_dir and misc.is_main_process():
+        if args.output_dir and (epoch % 100 == 0 or epoch + 1 == args.epochs):
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict()
+            }, os.path.join(args.output_dir, "model_checkpoint_ep{}.pth".format(epoch)))
+
+        if args.output_dir:  #  and misc.is_main_process()
             if log_writer is not None:
                 log_writer.flush()
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
