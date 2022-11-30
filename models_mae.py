@@ -54,7 +54,7 @@ class MLP(nn.Module):
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
-        # self.drop = nn.Dropout(drop)
+        # self.drop = nn.Dropout(droxp)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -89,7 +89,7 @@ def moore_penrose_iter_pinv(x, iters = 6):
 class Attention(nn.Module):
     def __init__(self, 
                  dim, 
-                 num_landmarks = 64, 
+                 num_landmarks = 65, 
                  pinv_iterations = 6, 
                  num_heads=8, 
                  qkv_bias=False, 
@@ -113,11 +113,11 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x):
+    def forward(self, x, visualization=False):
         B, N, C = x.shape
         original_N = N
         m, iters = self.num_landmarks, self.pinv_iterations
-
+        
         remainder = N % m
         if remainder > 0:
             padding = m - (N % m)
@@ -125,6 +125,9 @@ class Attention(nn.Module):
             B, N, C = x.shape
 
         q, k, v = self.qkv(x).chunk(3, dim = -1)
+        # if visualization:
+        #     # ToDo: Overwrite v here to be a diagonalization 
+        #     pass
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.num_heads), (q, k, v))
 
         q = q * self.scale
@@ -158,6 +161,7 @@ class Block(nn.Module):
     def __init__(self, 
                  dim, 
                  num_heads, 
+                 num_landmarks = 65,
                  mlp_ratio=4., 
                  qkv_bias=False, 
                  drop=0., 
@@ -179,6 +183,7 @@ class Block(nn.Module):
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim, 
+            num_landmarks=num_landmarks,
             num_heads=num_heads, 
             qkv_bias=qkv_bias, 
             proj_drop=drop)
@@ -204,6 +209,7 @@ class MaskedAutoencoderViT(nn.Module):
     def __init__(self,
                  embed_dim: int=1024,
                  depth: int=24,
+                 num_landmarks: int=65,
                  num_heads: int=16,
                  decoder_embed_dim: int=512,
                  decoder_depth: int=8,
@@ -218,6 +224,7 @@ class MaskedAutoencoderViT(nn.Module):
         Arguments:
             embed_dim:              embedding dimension for MAE encoder (default: 1024)
             depth:                  number of layers of Multihead Attention in the encoder (default: 24)
+            num_landmarks:          number of landmarks to use in Multihead Attention (default: 65)
             num_heads:              number of heads to use in Multihead Attention (default: 16)
             decoder_embed_dim:      embedding dimension of the decoder (default: 512)
             decoder_depth:          number of layers of Multihead Attention in the decoder (default: 8)
@@ -231,6 +238,7 @@ class MaskedAutoencoderViT(nn.Module):
         #### Masked Autencoder ####
         self.embed_dim = embed_dim
         self.depth = depth
+        self.num_landmarks = num_landmarks        
         self.num_heads = num_heads
         self.decoder_embed_dim = decoder_embed_dim
         self.decoder_depth = decoder_depth
@@ -243,7 +251,8 @@ class MaskedAutoencoderViT(nn.Module):
         #### MAE Encoder ####
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         self.blocks = nn.ModuleList([
-            Block(self.embed_dim, self.num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+            Block(dim=self.embed_dim, num_landmarks=self.num_landmarks, num_heads=self.num_heads, 
+            mlp_ratio=mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for _ in range(depth)])  # qk_scale=None,
         self.expression_embedding = nn.Linear(1, self.embed_dim, bias=True)
         self.norm = self.norm_layer(self.embed_dim)
@@ -256,7 +265,8 @@ class MaskedAutoencoderViT(nn.Module):
         # self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_genes + 1, decoder_embed_dim), requires_grad=True)  # fixed sin-cos embedding
 
         self.decoder_blocks = nn.ModuleList([
-            Block(self.decoder_embed_dim, self.decoder_num_heads, self.mlp_ratio, qkv_bias=True, norm_layer=self.norm_layer)  # qk_scale=None, 
+            Block(dim=self.decoder_embed_dim, num_landmarks=self.num_landmarks, num_heads=self.decoder_num_heads, 
+            mlp_ratio=self.mlp_ratio, qkv_bias=True, norm_layer=self.norm_layer)  # qk_scale=None, 
             for i in range(self.decoder_depth)])
 
         self.decoder_norm = norm_layer(self.decoder_embed_dim)
@@ -329,8 +339,8 @@ class MaskedAutoencoderViT(nn.Module):
         index_tensor = torch.LongTensor([self.num_genes]).to(expr.device)
         cls_token = self.cls_token + self.gene_index_embed(index_tensor)
         cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-        x = torch.cat((x, cls_tokens), dim=1)
 
+        x = torch.cat((x, cls_tokens), dim=1)
         # apply Transformer blocks
         for blk in self.blocks:
             x = blk(x)
@@ -360,14 +370,62 @@ class MaskedAutoencoderViT(nn.Module):
 
         # predictor projection
         x = self.decoder_pred(x)
-
+        x = x.sigmoid()
+        
         # remove cls token
         x = x[:, :-1, :]
 
         return x
 
+    def get_last_selfattention(self, x):
+        expr = x[0].unsqueeze(-1)
+        expression_emb = self.expression_embedding(expr)
+
+        # add pos embed w/o cls token
+        gene_idx = x[1]
+        x = expression_emb + self.gene_index_embed(gene_idx)  # self.pos_embed[:, :1, :]
+
+        # append cls token
+        index_tensor = torch.LongTensor([self.num_genes]).to(expr.device)
+        cls_token = self.cls_token + self.gene_index_embed(index_tensor)
+
+        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        x = torch.cat((x, cls_tokens), dim=1)
+        
+        # apply Transformer blocks
+        for i, blk in enumerate(self.blocks):
+            if i < len(self.blocks) - 1:
+                x = blk(x)
+            else:
+                # return attention of the last block
+                return blk(x, return_attention=True)
+
+    def get_intermediate_selfattention(self, x, layer_idx):
+        expr = x[0].unsqueeze(-1)
+        expression_emb = self.expression_embedding(expr)
+
+        # add pos embed w/o cls token
+        gene_idx = x[1]
+        x = expression_emb + self.gene_index_embed(gene_idx)  # self.pos_embed[:, :1, :]
+
+        # append cls token
+        index_tensor = torch.LongTensor([self.num_genes]).to(expr.device)
+        cls_token = self.cls_token + self.gene_index_embed(index_tensor)
+        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        x = torch.cat((x, cls_tokens), dim=1)
+        
+        # apply Transformer blocks
+        for i, blk in enumerate(self.blocks):
+            if i == layer_idx:
+                return blk(x, return_attention=True)
+            elif i < len(self.blocks) - 1:
+                x = blk(x)
+            else:
+                # return attention of the last block
+                return blk(x, return_attention=True)    
+    
     def forward_loss(self, x, pred, mask):
-        x = torch.nan_to_num(x)
+        #x = torch.nan_to_num(x)
         pred = torch.squeeze(pred)
         loss = (((pred - x) ** 2) * mask).sum() / mask.sum()  # mean loss on removed genes
         return loss
@@ -379,33 +437,13 @@ class MaskedAutoencoderViT(nn.Module):
         return loss, pred, mask, latent[:, -1]
 
 
-def mae_vit_test(**kwargs):
+def mae_fashionmnist(**kwargs):
     model = MaskedAutoencoderViT(
-        embed_dim=256, depth=8, num_heads=2,
-        decoder_embed_dim=256, decoder_depth=2, decoder_num_heads=2,
-        #gene_embed_dim=8,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-def mae_vit_d128(**kwargs):
-    model = MaskedAutoencoderViT(
-        embed_dim=128, depth=8, num_heads=2,
-        decoder_embed_dim=128, decoder_depth=2, decoder_num_heads=2,
-        # gene_embed_dim=128,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-def mae_vit_d64(**kwargs):
-    model = MaskedAutoencoderViT(
-        embed_dim=512, depth=4, num_heads=2,
-        decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=2,
+        embed_dim=128, depth=8, num_heads=4,
+        decoder_embed_dim=128, decoder_depth=4, decoder_num_heads=4,
         # gene_embed_dim=64,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 # set recommended archs
-mae_vit_test = mae_vit_test
-mae_vit_d128 = mae_vit_d128
-mae_vit_d64 = mae_vit_d64
-mae_vit_small = mae_vit_d64
-
+mae_fashionmnist = mae_fashionmnist
